@@ -453,7 +453,7 @@ float InterbotixRobotXS::robot_convert_linear_position_to_radian(std::string con
 }
 
 /// @brief Converts a specified angular position into the linear distance from one gripper finger to the center of the gripper servo horn
-/// @param name - name of the gripper servo to command
+/// @param name - name of the gripper sevo to command
 /// @param angular_position - desired gripper angular position [rad]
 /// @param <float> [out] - linear position [m] from a gripper finger to the center of the gripper servo horn
 float InterbotixRobotXS::robot_convert_angular_position_to_linear(std::string const& name, float const& angular_position)
@@ -478,13 +478,13 @@ bool InterbotixRobotXS::robot_get_motor_configs(void)
   }
   catch (YAML::BadFile &error)
   {
-    ROS_FATAL("[xs_sdk] Motor Config file at '%s' was not found or has a bad format. Shutting down...", motor_configs_file.c_str());
+    ROS_FATAL("[xs_sdk] Motor Config file was not found or has a bad format. Shutting down...");
     ROS_FATAL("[xs_sdk] YAML Error: '%s'", error.what());
     return false;
   }
   if (motor_configs.IsNull())
   {
-    ROS_FATAL("[xs_sdk] Motor Config file at '%s' was not found. Shutting down...", motor_configs_file.c_str());
+    ROS_FATAL("[xs_sdk] Motor Config file was not found. Shutting down...");
     return false;
   }
 
@@ -496,12 +496,12 @@ bool InterbotixRobotXS::robot_get_motor_configs(void)
   }
   catch (YAML::BadFile &error)
   {
-    ROS_ERROR("[xs_sdk] Motor Config file at '%s' was not found or has a bad format. Shutting down...", mode_configs_file.c_str());
+    ROS_ERROR("[xs_sdk] Motor Config file was not found or has a bad format. Shutting down...");
     ROS_ERROR("[xs_sdk] YAML Error: '%s'", error.what());
     return false;
   }
   if (mode_configs.IsNull())
-    ROS_INFO("[xs_sdk] Mode Config file is empty. Will use defaults.");
+    ROS_INFO("[xs_sdk] Mode Config file is empty.");
 
   port = motor_configs["port"].as<std::string>(PORT);
   if (mode_configs["port"])
@@ -541,15 +541,6 @@ bool InterbotixRobotXS::robot_get_motor_configs(void)
 
   YAML::Node joint_order = motor_configs["joint_order"];
   YAML::Node sleep_positions = motor_configs["sleep_positions"];
-
-  if (joint_order.size() != sleep_positions.size())
-  {
-    ROS_FATAL(
-      "[xs_sdk] Error when parsing Motor Config file: Length of joint_order list (%ld) does not match length of sleep_positions list (%ld).",
-      joint_order.size(), sleep_positions.size());
-    return false;
-  }
-
   JointGroup all_joints;
   all_joints.joint_num = (uint8_t) joint_order.size();
   all_joints.mode = "position";
@@ -618,15 +609,6 @@ bool InterbotixRobotXS::robot_get_motor_configs(void)
   timer_hz = pub_configs["update_rate"].as<int>(100);
   pub_states = pub_configs["publish_states"].as<bool>(true);
   js_topic = pub_configs["topic_name"].as<std::string>("joint_states");
-  read_failure_behavior = static_cast<ReadFailureBehavior>(pub_configs["read_failure_behavior"].as<int>(ReadFailureBehavior::PUB_DXL_WB));
-  // Do input validation on read failure behavior parameter
-  if (read_failure_behavior < ReadFailureBehavior::PUB_DXL_WB || read_failure_behavior > ReadFailureBehavior::PUB_NAN)
-  {
-    // If out of range or invalid, default to PUB_DXL_WB/0
-    ROS_ERROR("[xs_sdk] Invalid option %d provided to joint_state_publisher.read_failure_behavior. Will default to option 0.", read_failure_behavior);
-    read_failure_behavior = ReadFailureBehavior::PUB_DXL_WB;
-  }
-  ROS_DEBUG("[xs_sdk::robot_get_motor_configs] read_failure_behavior set to %d.", read_failure_behavior);
 
   ROS_INFO("[xs_sdk] Loaded motor configs from '%s'.", motor_configs_file.c_str());
   return true;
@@ -1167,7 +1149,6 @@ void InterbotixRobotXS::robot_update_joint_states(const ros::TimerEvent &e)
   std::vector<int32_t> get_position(all_ptr->joint_num, 0);
   joint_state_msg.name = all_ptr->joint_names;
 
-  bool read_failed = false;
   if (dxl_wb.getProtocolVersion() == 2.0f)
   {
     // Execute sync read from all pinged DYNAMIXELs
@@ -1176,8 +1157,7 @@ void InterbotixRobotXS::robot_update_joint_states(const ros::TimerEvent &e)
                           all_ptr->joint_num,
                           &log))
     {
-      ROS_ERROR("[xs_sdk] Failed syncRead: %s", log);
-      read_failed = true;
+      ROS_ERROR("[xs_sdk] %s", log);
     }
 
     // Gets present current of all servos
@@ -1189,9 +1169,8 @@ void InterbotixRobotXS::robot_update_joint_states(const ros::TimerEvent &e)
                                 get_current.data(),
                                 &log))
     {
-      ROS_ERROR("[xs_sdk] Failed getSyncReadData for Present_Current: %s", log);
-      read_failed = true;
-    }
+      ROS_ERROR("[xs_sdk] %s", log);
+    }             
 
     // Gets present velocity of all servos
     if (!dxl_wb.getSyncReadData(SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
@@ -1202,8 +1181,7 @@ void InterbotixRobotXS::robot_update_joint_states(const ros::TimerEvent &e)
                                 get_velocity.data(),
                                 &log))
     {
-      ROS_ERROR("[xs_sdk] Failed getSyncReadData for Present_Velocity: %s", log);
-      read_failed = true;
+      ROS_ERROR("[xs_sdk] %s", log);
     }
 
     // Gets present position of all servos
@@ -1215,16 +1193,15 @@ void InterbotixRobotXS::robot_update_joint_states(const ros::TimerEvent &e)
                                 get_position.data(),
                                 &log))
     {
-      ROS_ERROR("[xs_sdk] Failed getSyncReadData for Present_Position: %s", log);
-      read_failed = true;
+      ROS_ERROR("[xs_sdk] %s", log);
     }
 
     uint8_t index = 0;
     for (auto const& id : all_ptr->joint_ids)
     {
-      float position = 0.0;
-      float velocity = 0.0;
-      float effort = 0.0;
+      float position = 0;
+      float velocity = 0;
+      float effort = 0;
 
       if (strcmp(dxl_wb.getModelName(id), "XL-320") == 0) effort = dxl_wb.convertValue2Load(get_current.at(index));
       else effort = dxl_wb.convertValue2Current(get_current.at(index));
@@ -1251,8 +1228,7 @@ void InterbotixRobotXS::robot_update_joint_states(const ros::TimerEvent &e)
                                 get_all_data.data(),
                                 &log))
       {
-        ROS_ERROR("[xs_sdk] Failed readRegister for joint states: %s", log);
-        read_failed = true;
+        ROS_ERROR("[xs_sdk] %s", log);
       }
 
       int16_t effort_raw = DXL_MAKEWORD(get_all_data.at(4), get_all_data.at(5));
@@ -1281,34 +1257,6 @@ void InterbotixRobotXS::robot_update_joint_states(const ros::TimerEvent &e)
     joint_state_msg.effort.push_back(0);
     joint_state_msg.effort.push_back(0);
   }
-
-  // If read failed, check to see what motors we can actually read from. This will provide
-  // some additional troubleshooting information on what motors may have been disconnected or are
-  // unresponsive
-  if (read_failed)
-  {
-    // Note that this process is slow and dramatically reduces the joint state pub frequency
-    // However, we are in a failure state so performance does not matter
-    for (const auto id : all_ptr->joint_ids)
-    {
-      int32_t value = 0;
-      // Try to read from an item available on all motor models
-      if (!dxl_wb.itemRead(id, "ID", &value))
-      {
-        // Log the motor IDs we can't read from
-        ROS_ERROR("[xs_sdk] Failed to read from DYNAMIXEL ID: %d", id);
-      }
-    }
-    // If read failed and SDK is configured to publish NaNs, fill the joint state message with NaNs
-    if (read_failure_behavior == ReadFailureBehavior::PUB_NAN)
-    {
-      const auto nan_states = std::vector<double>(joint_state_msg.position.size(), std::numeric_limits<double>::quiet_NaN());
-      joint_state_msg.position = std::vector<double>(nan_states);
-      joint_state_msg.velocity = std::vector<double>(nan_states);
-      joint_state_msg.effort = std::vector<double>(nan_states);
-    }
-  }
-
   // Publish the message to the joint_states topic
   joint_state_msg.header.stamp = ros::Time::now();
   joint_states = joint_state_msg;

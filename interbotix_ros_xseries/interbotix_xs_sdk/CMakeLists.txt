@@ -33,6 +33,7 @@ find_library(YAML_CPP_LIBRARY
   NAMES YAML_CPP
   PATHS ${YAML_CPP_LIBRARY_DIRS}
 )
+link_directories(${YAML_CPP_LIBRARY_DIRS})
 
 if(NOT ${YAML_CPP_VERSION} VERSION_LESS "0.5")
 add_definitions(-DHAVE_NEW_YAMLCPP)
@@ -66,7 +67,6 @@ include_directories(
 add_library(${PROJECT_NAME}
   src/xs_sdk_obj.cpp
 )
-target_link_libraries(${PROJECT_NAME} PUBLIC ${YAML_CPP_LIBRARIES})
 add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Declare a C++ executable
